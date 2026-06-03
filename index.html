@@ -1,492 +1,581 @@
-import { useState } from 'react';
-
-const SUITS = ['♠', '♥', '♦', '♣'];
-const RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
-const SHOE_SIZE = 6 * 52;
-const RESHUFFLE_AT = 60;
-
-function createShoe() {
-  const shoe = [];
-  for (let d = 0; d < 6; d++) {
-    for (const s of SUITS) {
-      for (const r of RANKS) {
-        shoe.push({ rank: r, suit: s });
-      }
-    }
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Blackjack</title>
+<style>
+  :root {
+    --green-900: #064e3b;
+    --green-800: #065f46;
+    --green-300: #6ee7b7;
+    --green-200: #a7f3d0;
+    --green-700: #047857;
+    --slate-900: #0f172a;
+    --slate-800: #1e293b;
+    --slate-700: #334155;
+    --slate-600: #475569;
+    --amber-500: #f59e0b;
+    --amber-400: #fbbf24;
   }
-  for (let i = shoe.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [shoe[i], shoe[j]] = [shoe[j], shoe[i]];
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--green-900);
+    color: #f1f5f9;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    padding: 16px;
   }
-  return shoe;
-}
+  .wrap { max-width: 680px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin: 0 0 4px; }
+  .rules { font-size: 0.7rem; color: var(--green-200); margin-bottom: 16px; }
 
-function rankValue(rank) {
-  if (rank === 'A') return 11;
-  if (rank === 'J' || rank === 'Q' || rank === 'K') return 10;
-  return parseInt(rank, 10);
-}
+  .status { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin-bottom: 16px; }
+  .stat-box { background: var(--green-800); border-radius: 6px; padding: 8px; }
+  .stat-label { color: var(--green-300); font-size: 0.7rem; }
+  .stat-val { font-size: 1.1rem; font-weight: bold; }
 
-function handTotal(cards) {
-  let total = cards.reduce((sum, c) => sum + rankValue(c.rank), 0);
-  let aces = cards.filter(c => c.rank === 'A').length;
-  while (total > 21 && aces > 0) {
-    total -= 10;
-    aces--;
+  .section { margin-bottom: 12px; }
+  .section-title { font-size: 0.85rem; margin-bottom: 4px; }
+  .tag { color: var(--green-300); }
+  .cards-row { min-height: 5rem; }
+
+  .card {
+    display: inline-flex; flex-direction: column; align-items: center; justify-content: center;
+    width: 3rem; height: 4.25rem; margin: 4px;
+    border: 2px solid #1e293b; border-radius: 6px; background: #fff;
   }
-  return total;
-}
-
-function isSoft(cards) {
-  const raw = cards.reduce((sum, c) => sum + rankValue(c.rank), 0);
-  const aces = cards.filter(c => c.rank === 'A').length;
-  return aces > 0 && raw <= 21;
-}
-
-function isNaturalBJ(cards) {
-  return cards.length === 2 && handTotal(cards) === 21;
-}
-
-const Card = ({ card, hidden }) => {
-  const style = { width: '3rem', height: '4.25rem' };
-  if (hidden) {
-    return (
-      <div style={style} className="inline-flex items-center justify-center m-1 rounded-md border-2 border-slate-800 bg-gradient-to-br from-blue-700 to-blue-900 text-white font-bold">
-        ?
-      </div>
-    );
+  .card.hidden {
+    background: linear-gradient(135deg, #1d4ed8, #1e3a8a);
+    color: #fff; font-weight: bold; flex-direction: row;
   }
-  const red = card.suit === '♥' || card.suit === '♦';
-  return (
-    <div style={style} className={`inline-flex flex-col items-center justify-center m-1 rounded-md border-2 border-slate-800 bg-white ${red ? 'text-red-600' : 'text-slate-900'}`}>
-      <div className="text-base font-bold leading-none">{card.rank}</div>
-      <div className="text-lg leading-none mt-1">{card.suit}</div>
+  .card .rank { font-size: 1rem; font-weight: bold; line-height: 1; }
+  .card .suit { font-size: 1.1rem; line-height: 1; margin-top: 4px; }
+  .card.red { color: #dc2626; }
+  .card.black { color: #0f172a; }
+
+  .hand-block { margin-bottom: 8px; padding: 4px; border-radius: 6px; }
+  .hand-block.active { background: rgba(120, 53, 15, 0.4); border: 1px solid var(--amber-500); }
+  .hand-meta { font-size: 0.7rem; margin-bottom: 4px; }
+  .hand-meta .bet { color: var(--green-200); margin-left: 8px; }
+  .hand-meta .cur { color: var(--amber-400); margin-left: 8px; }
+
+  .message {
+    background: var(--slate-900); border: 1px solid var(--green-700);
+    border-radius: 6px; padding: 8px; margin-bottom: 16px; font-size: 0.85rem;
+  }
+
+  .controls { margin-bottom: 16px; }
+  .bet-label { font-size: 0.7rem; color: var(--green-200); margin-bottom: 8px; }
+  .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  button {
+    font-family: inherit; font-size: 0.85rem; cursor: pointer;
+    border-radius: 6px; padding: 6px 12px; border: 1px solid var(--slate-600);
+    background: var(--slate-800); color: #f1f5f9;
+  }
+  button:hover:not(:disabled) { background: var(--slate-700); }
+  button:disabled { opacity: 0.3; cursor: not-allowed; }
+  button.chip.sel { background: var(--amber-500); color: var(--slate-900); border-color: var(--amber-400); }
+  button.primary { background: var(--amber-500); color: var(--slate-900); font-weight: bold; padding: 8px 20px; }
+  button.primary:hover:not(:disabled) { background: var(--amber-400); }
+  button.act { font-weight: bold; border: none; padding: 8px 16px; }
+  button.hit { background: #2563eb; } button.hit:hover { background: #3b82f6; }
+  button.stand { background: #ea580c; } button.stand:hover { background: #f97316; }
+  button.dbl { background: #9333ea; } button.dbl:hover:not(:disabled) { background: #a855f7; }
+  button.split { background: #db2777; } button.split:hover:not(:disabled) { background: #ec4899; }
+  button.surr { background: #be123c; } button.surr:hover:not(:disabled) { background: #e11d48; }
+  button.next { background: #10b981; color: var(--slate-900); font-weight: bold; }
+  button.next:hover:not(:disabled) { background: #34d399; }
+  button.reset { background: var(--slate-700); }
+
+  .footer { border-top: 1px solid var(--green-700); padding-top: 12px; font-size: 0.7rem; color: var(--green-200); }
+  .stat-line { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-bottom: 8px; }
+  .pos { color: var(--green-300); } .neg { color: #fca5a5; }
+  .history-row { display: flex; flex-wrap: wrap; gap: 4px; }
+  .hpill { padding: 2px 8px; border-radius: 4px; }
+  .hpill.win { background: var(--green-700); }
+  .hpill.loss { background: #991b1b; }
+  .hpill.push { background: var(--slate-700); }
+  .hidden-el { display: none; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Blackjack</h1>
+  <div class="rules">6 副 · S17 · BJ 3:2 · DAS · 投降 50% · 分牌仅同 rank · 不可 resplit · 拆 A 各发一张</div>
+
+  <div class="status">
+    <div class="stat-box"><div class="stat-label">余额</div><div class="stat-val" id="bankroll">$1000</div></div>
+    <div class="stat-box"><div class="stat-label">本局总注</div><div class="stat-val" id="wagered">$10</div></div>
+    <div class="stat-box"><div class="stat-label">牌堆</div><div class="stat-val" id="shoe">312/312</div></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">庄家 <span class="tag" id="dealer-total">[]</span></div>
+    <div class="cards-row" id="dealer-cards"></div>
+  </div>
+
+  <div class="section">
+    <div class="section-title">玩家</div>
+    <div id="player-hands"></div>
+  </div>
+
+  <div class="message" id="message">设定注码后点击「发牌」开始</div>
+
+  <!-- 下注阶段 -->
+  <div class="controls" id="bet-controls">
+    <div class="bet-label">注码 (10–100)</div>
+    <div class="btn-row" id="chip-row"></div>
+    <button class="primary" id="deal-btn">发牌</button>
+  </div>
+
+  <!-- 操作阶段 -->
+  <div class="btn-row hidden-el" id="play-controls">
+    <button class="act hit" id="hit-btn">要牌</button>
+    <button class="act stand" id="stand-btn">停牌</button>
+    <button class="act dbl" id="dbl-btn">加倍</button>
+    <button class="act split" id="split-btn">分牌</button>
+    <button class="act surr" id="surr-btn">投降</button>
+  </div>
+
+  <!-- 结算阶段 -->
+  <div class="btn-row hidden-el" id="settled-controls">
+    <button class="next" id="next-btn">下一局</button>
+    <button class="reset" id="reset-btn">重置</button>
+  </div>
+
+  <div class="footer">
+    <div class="stat-line">
+      <span>局数: <span id="s-rounds">0</span></span>
+      <span>胜: <span id="s-wins">0</span></span>
+      <span>负: <span id="s-losses">0</span></span>
+      <span>平: <span id="s-pushes">0</span></span>
+      <span>累计盈亏: <span id="s-net">+0</span></span>
     </div>
-  );
-};
+    <div id="history-wrap" class="hidden-el">
+      <div class="tag" style="margin-bottom:4px;">近 10 局:</div>
+      <div class="history-row" id="history-row"></div>
+    </div>
+  </div>
+</div>
 
-export default function Blackjack() {
-  const [shoe, setShoe] = useState(() => createShoe());
-  const [bankroll, setBankroll] = useState(1000);
-  const [bet, setBet] = useState(10);
-  const [hands, setHands] = useState([]);
-  const [currentIdx, setCurrentIdx] = useState(0);
-  const [dealerHand, setDealerHand] = useState([]);
-  const [phase, setPhase] = useState('betting');
-  const [message, setMessage] = useState('设定注码后点击「发牌」开始');
-  const [history, setHistory] = useState([]);
-  const [stats, setStats] = useState({ rounds: 0, wins: 0, losses: 0, pushes: 0 });
+<script>
+(function () {
+  "use strict";
 
-  const ensureShoe = (s) => s.length < RESHUFFLE_AT ? createShoe() : s;
+  var SUITS = ['♠', '♥', '♦', '♣'];
+  var RANKS = ['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'];
+  var SHOE_SIZE = 6 * 52;
+  var RESHUFFLE_AT = 60;
 
-  const recordRound = (totalNet) => {
-    setHistory(h => [{ net: totalNet }, ...h].slice(0, 10));
-    setStats(s => {
-      const o = totalNet > 0 ? 'win' : totalNet < 0 ? 'loss' : 'push';
-      return {
-        rounds: s.rounds + 1,
-        wins: s.wins + (o === 'win' ? 1 : 0),
-        losses: s.losses + (o === 'loss' ? 1 : 0),
-        pushes: s.pushes + (o === 'push' ? 1 : 0),
-      };
-    });
-  };
-
-  const startHand = () => {
-    if (bet > bankroll || bet < 10) return;
-    let s = ensureShoe(shoe);
-    const ph = [s[0], s[2]];
-    const dh = [s[1], s[3]];
-    s = s.slice(4);
-
-    const initialHand = {
-      cards: ph, bet, doubled: false, finished: false,
-      surrendered: false, isAcesSplit: false, fromSplit: false,
-    };
-
-    setShoe(s);
-    setDealerHand(dh);
-    setBankroll(b => b - bet);
-
-    const pBJ = isNaturalBJ(ph);
-    const dBJ = isNaturalBJ(dh);
-
-    if (pBJ || dBJ) {
-      let payout = 0, net = 0, msg = '';
-      if (pBJ && dBJ) {
-        payout = bet; net = 0; msg = '双方 Blackjack — 平局';
-      } else if (pBJ) {
-        const win = Math.floor(bet * 3 / 2);
-        payout = bet + win; net = win;
-        msg = `Blackjack! +${win}`;
-      } else {
-        net = -bet; msg = `庄家 Blackjack ${net}`;
-      }
-      setBankroll(b => b + payout);
-      setHands([{ ...initialHand, finished: true }]);
-      setMessage(msg);
-      setPhase('settled');
-      recordRound(net);
-    } else {
-      setHands([initialHand]);
-      setCurrentIdx(0);
-      setPhase('playing');
-      setMessage('要牌 / 停牌 / 加倍 / 投降 / 分牌');
-    }
-  };
-
-  const advanceOrSettle = (newHands, newShoe) => {
-    const nextIdx = newHands.findIndex(h => !h.finished);
-    if (nextIdx === -1) {
-      runDealer(newHands, newShoe);
-    } else {
-      setHands(newHands);
-      setShoe(newShoe);
-      setCurrentIdx(nextIdx);
-    }
-  };
-
-  const hit = () => {
-    let s = ensureShoe(shoe);
-    const newHands = hands.map((h, i) => {
-      if (i !== currentIdx) return h;
-      const newCards = [...h.cards, s[0]];
-      const t = handTotal(newCards);
-      return { ...h, cards: newCards, finished: t >= 21 };
-    });
-    s = s.slice(1);
-    advanceOrSettle(newHands, s);
-  };
-
-  const stand = () => {
-    const newHands = hands.map((h, i) =>
-      i === currentIdx ? { ...h, finished: true } : h
-    );
-    advanceOrSettle(newHands, shoe);
-  };
-
-  const doubleDown = () => {
-    const cur = hands[currentIdx];
-    if (!cur || cur.cards.length !== 2 || cur.bet > bankroll || cur.isAcesSplit) return;
-    let s = ensureShoe(shoe);
-    setBankroll(b => b - cur.bet);
-    const newHands = hands.map((h, i) => {
-      if (i !== currentIdx) return h;
-      return {
-        ...h, cards: [...h.cards, s[0]],
-        bet: h.bet * 2, doubled: true, finished: true,
-      };
-    });
-    s = s.slice(1);
-    advanceOrSettle(newHands, s);
-  };
-
-  const surrender = () => {
-    if (hands.length !== 1) return;
-    const cur = hands[0];
-    if (cur.cards.length !== 2 || cur.doubled) return;
-    const newHands = [{ ...cur, surrendered: true, finished: true }];
-    advanceOrSettle(newHands, shoe);
-  };
-
-  const split = () => {
-    const cur = hands[currentIdx];
-    if (hands.length >= 2) return;
-    if (!cur || cur.cards.length !== 2) return;
-    if (cur.cards[0].rank !== cur.cards[1].rank) return;
-    if (cur.bet > bankroll) return;
-
-    let s = ensureShoe(shoe);
-    const isAces = cur.cards[0].rank === 'A';
-    const c1 = s[0], c2 = s[1];
-    s = s.slice(2);
-
-    setBankroll(b => b - cur.bet);
-
-    const h1 = {
-      cards: [cur.cards[0], c1], bet: cur.bet, doubled: false,
-      finished: isAces, surrendered: false, isAcesSplit: isAces, fromSplit: true,
-    };
-    const h2 = {
-      cards: [cur.cards[1], c2], bet: cur.bet, doubled: false,
-      finished: isAces, surrendered: false, isAcesSplit: isAces, fromSplit: true,
-    };
-
-    if (isAces) {
-      runDealer([h1, h2], s);
-    } else {
-      setHands([h1, h2]);
-      setShoe(s);
-      setCurrentIdx(0);
-    }
-  };
-
-  const runDealer = (finalHands, currentShoe) => {
-    let s = currentShoe;
-    let dh = [...dealerHand];
-
-    const anyAlive = finalHands.some(
-      h => !h.surrendered && handTotal(h.cards) <= 21
-    );
-
-    if (anyAlive) {
-      while (handTotal(dh) < 17) {
-        s = ensureShoe(s);
-        dh = [...dh, s[0]];
-        s = s.slice(1);
-      }
-    }
-
-    setShoe(s);
-    setDealerHand(dh);
-    setHands(finalHands);
-
-    const dTotal = handTotal(dh);
-    let totalNet = 0;
-    const msgs = [];
-
-    finalHands.forEach((h, i) => {
-      const wager = h.bet;
-      let net = 0, payout = 0;
-      const label = finalHands.length > 1 ? `手${i + 1} ` : '';
-
-      if (h.surrendered) {
-        const refund = Math.floor(wager / 2);
-        payout = refund;
-        net = -(wager - refund);
-        msgs.push(`${label}投降${net}`);
-      } else if (handTotal(h.cards) > 21) {
-        net = -wager;
-        msgs.push(`${label}爆${net}`);
-      } else {
-        const pTotal = handTotal(h.cards);
-        if (dTotal > 21 || pTotal > dTotal) {
-          payout = wager * 2; net = wager;
-          msgs.push(`${label}${pTotal}vs${dTotal > 21 ? '爆' : dTotal} +${net}`);
-        } else if (pTotal < dTotal) {
-          net = -wager;
-          msgs.push(`${label}${pTotal}vs${dTotal} ${net}`);
-        } else {
-          payout = wager; net = 0;
-          msgs.push(`${label}平${pTotal}`);
+  // ---- 牌堆 ----
+  function createShoe() {
+    var shoe = [];
+    for (var d = 0; d < 6; d++) {
+      for (var si = 0; si < SUITS.length; si++) {
+        for (var ri = 0; ri < RANKS.length; ri++) {
+          shoe.push({ rank: RANKS[ri], suit: SUITS[si] });
         }
       }
-      setBankroll(b => b + payout);
-      totalNet += net;
-    });
-
-    const summary = finalHands.length > 1
-      ? `${msgs.join(' · ')} = ${totalNet >= 0 ? '+' : ''}${totalNet}`
-      : msgs[0];
-    setMessage(summary);
-    setPhase('settled');
-    recordRound(totalNet);
-  };
-
-  const nextHand = () => {
-    if (bankroll < 10) {
-      setMessage('余额不足 — 请重置');
-      return;
     }
-    if (bet > bankroll) setBet(Math.max(10, Math.floor(bankroll / 10) * 10));
-    setHands([]);
-    setDealerHand([]);
-    setCurrentIdx(0);
-    setPhase('betting');
-    setMessage('设定注码后点击「发牌」');
+    for (var i = shoe.length - 1; i > 0; i--) {
+      var j = Math.floor(Math.random() * (i + 1));
+      var tmp = shoe[i]; shoe[i] = shoe[j]; shoe[j] = tmp;
+    }
+    return shoe;
+  }
+  function ensureShoe() {
+    if (state.shoe.length < RESHUFFLE_AT) state.shoe = createShoe();
+  }
+  function draw() {
+    ensureShoe();
+    return state.shoe.shift();
+  }
+
+  // ---- 点数 ----
+  function rankValue(rank) {
+    if (rank === 'A') return 11;
+    if (rank === 'J' || rank === 'Q' || rank === 'K') return 10;
+    return parseInt(rank, 10);
+  }
+  function handTotal(cards) {
+    var total = 0, aces = 0;
+    for (var i = 0; i < cards.length; i++) {
+      total += rankValue(cards[i].rank);
+      if (cards[i].rank === 'A') aces++;
+    }
+    while (total > 21 && aces > 0) { total -= 10; aces--; }
+    return total;
+  }
+  function isSoft(cards) {
+    var raw = 0, aces = 0;
+    for (var i = 0; i < cards.length; i++) {
+      raw += rankValue(cards[i].rank);
+      if (cards[i].rank === 'A') aces++;
+    }
+    return aces > 0 && raw <= 21;
+  }
+  function isNaturalBJ(cards) {
+    return cards.length === 2 && handTotal(cards) === 21;
+  }
+
+  // ---- 状态 ----
+  var state = {
+    shoe: createShoe(),
+    bankroll: 1000,
+    bet: 10,
+    hands: [],
+    currentIdx: 0,
+    dealerHand: [],
+    phase: 'betting', // betting | playing | settled
+    message: '设定注码后点击「发牌」开始',
+    history: [],
+    stats: { rounds: 0, wins: 0, losses: 0, pushes: 0 }
   };
 
-  const reset = () => {
-    setShoe(createShoe());
-    setBankroll(1000);
-    setBet(10);
-    setHands([]);
-    setDealerHand([]);
-    setCurrentIdx(0);
-    setPhase('betting');
-    setMessage('已重置');
-    setHistory([]);
-    setStats({ rounds: 0, wins: 0, losses: 0, pushes: 0 });
-  };
+  function recordRound(totalNet) {
+    state.history.unshift({ net: totalNet });
+    if (state.history.length > 10) state.history.length = 10;
+    state.stats.rounds++;
+    if (totalNet > 0) state.stats.wins++;
+    else if (totalNet < 0) state.stats.losses++;
+    else state.stats.pushes++;
+  }
 
-  const adjustBet = (delta) => {
-    setBet(b => Math.min(Math.min(100, bankroll), Math.max(10, b + delta)));
-  };
+  // ---- 动作 ----
+  function startHand() {
+    if (state.bet > state.bankroll || state.bet < 10) return;
+    var ph = [draw(), null]; var dh = [draw(), null];
+    ph[1] = draw(); dh[1] = draw();
 
-  const showHole = phase !== 'playing';
-  const cur = hands[currentIdx];
+    var initialHand = {
+      cards: ph, bet: state.bet, doubled: false, finished: false,
+      surrendered: false, isAcesSplit: false, fromSplit: false
+    };
+    state.dealerHand = dh;
+    state.bankroll -= state.bet;
 
-  const canDouble = phase === 'playing' && cur && cur.cards.length === 2 && !cur.doubled && !cur.isAcesSplit && cur.bet <= bankroll;
-  const canSurrender = phase === 'playing' && hands.length === 1 && cur && cur.cards.length === 2 && !cur.doubled;
-  const canSplit = phase === 'playing' && hands.length === 1 && cur && cur.cards.length === 2 &&
-    cur.cards[0].rank === cur.cards[1].rank && cur.bet <= bankroll;
+    var pBJ = isNaturalBJ(ph), dBJ = isNaturalBJ(dh);
+    if (pBJ || dBJ) {
+      var payout = 0, net = 0, msg = '';
+      if (pBJ && dBJ) { payout = state.bet; net = 0; msg = '双方 Blackjack — 平局'; }
+      else if (pBJ) { var win = Math.floor(state.bet * 3 / 2); payout = state.bet + win; net = win; msg = 'Blackjack! +' + win; }
+      else { net = -state.bet; msg = '庄家 Blackjack ' + net; }
+      state.bankroll += payout;
+      initialHand.finished = true;
+      state.hands = [initialHand];
+      state.message = msg;
+      state.phase = 'settled';
+      recordRound(net);
+    } else {
+      state.hands = [initialHand];
+      state.currentIdx = 0;
+      state.phase = 'playing';
+      state.message = '要牌 / 停牌 / 加倍 / 投降 / 分牌';
+    }
+    render();
+  }
 
-  const handLabel = (h) => {
-    const t = handTotal(h.cards);
-    let tag = '';
+  function advanceOrSettle() {
+    var nextIdx = -1;
+    for (var i = 0; i < state.hands.length; i++) {
+      if (!state.hands[i].finished) { nextIdx = i; break; }
+    }
+    if (nextIdx === -1) {
+      runDealer();
+    } else {
+      state.currentIdx = nextIdx;
+    }
+  }
+
+  function hit() {
+    var h = state.hands[state.currentIdx];
+    h.cards.push(draw());
+    if (handTotal(h.cards) >= 21) h.finished = true;
+    advanceOrSettle();
+    render();
+  }
+
+  function stand() {
+    state.hands[state.currentIdx].finished = true;
+    advanceOrSettle();
+    render();
+  }
+
+  function doubleDown() {
+    var h = state.hands[state.currentIdx];
+    if (h.cards.length !== 2 || h.bet > state.bankroll || h.isAcesSplit) return;
+    state.bankroll -= h.bet;
+    h.cards.push(draw());
+    h.bet *= 2;
+    h.doubled = true;
+    h.finished = true;
+    advanceOrSettle();
+    render();
+  }
+
+  function surrender() {
+    if (state.hands.length !== 1) return;
+    var h = state.hands[0];
+    if (h.cards.length !== 2 || h.doubled) return;
+    h.surrendered = true;
+    h.finished = true;
+    advanceOrSettle();
+    render();
+  }
+
+  function split() {
+    var h = state.hands[state.currentIdx];
+    if (state.hands.length >= 2) return;
+    if (h.cards.length !== 2) return;
+    if (h.cards[0].rank !== h.cards[1].rank) return;
+    if (h.bet > state.bankroll) return;
+
+    var isAces = h.cards[0].rank === 'A';
+    state.bankroll -= h.bet;
+
+    var h1 = { cards: [h.cards[0], draw()], bet: h.bet, doubled: false, finished: isAces, surrendered: false, isAcesSplit: isAces, fromSplit: true };
+    var h2 = { cards: [h.cards[1], draw()], bet: h.bet, doubled: false, finished: isAces, surrendered: false, isAcesSplit: isAces, fromSplit: true };
+    state.hands = [h1, h2];
+    state.currentIdx = 0;
+
+    if (isAces) { runDealer(); }
+    render();
+  }
+
+  function runDealer() {
+    var anyAlive = false;
+    for (var i = 0; i < state.hands.length; i++) {
+      var hh = state.hands[i];
+      if (!hh.surrendered && handTotal(hh.cards) <= 21) { anyAlive = true; break; }
+    }
+    if (anyAlive) {
+      while (handTotal(state.dealerHand) < 17) {
+        state.dealerHand.push(draw());
+      }
+    }
+
+    var dTotal = handTotal(state.dealerHand);
+    var totalNet = 0;
+    var msgs = [];
+
+    for (var k = 0; k < state.hands.length; k++) {
+      var h = state.hands[k];
+      var wager = h.bet, net = 0, payout = 0;
+      var label = state.hands.length > 1 ? ('手' + (k + 1) + ' ') : '';
+
+      if (h.surrendered) {
+        var refund = Math.floor(wager / 2);
+        payout = refund; net = -(wager - refund);
+        msgs.push(label + '投降' + net);
+      } else if (handTotal(h.cards) > 21) {
+        net = -wager;
+        msgs.push(label + '爆' + net);
+      } else {
+        var pTotal = handTotal(h.cards);
+        if (dTotal > 21 || pTotal > dTotal) {
+          payout = wager * 2; net = wager;
+          msgs.push(label + pTotal + 'vs' + (dTotal > 21 ? '爆' : dTotal) + ' +' + net);
+        } else if (pTotal < dTotal) {
+          net = -wager;
+          msgs.push(label + pTotal + 'vs' + dTotal + ' ' + net);
+        } else {
+          payout = wager; net = 0;
+          msgs.push(label + '平' + pTotal);
+        }
+      }
+      state.bankroll += payout;
+      totalNet += net;
+    }
+
+    state.message = state.hands.length > 1
+      ? (msgs.join(' · ') + ' = ' + (totalNet >= 0 ? '+' : '') + totalNet)
+      : msgs[0];
+    state.phase = 'settled';
+    recordRound(totalNet);
+  }
+
+  function nextHand() {
+    if (state.bankroll < 10) { state.message = '余额不足 — 请重置'; render(); return; }
+    if (state.bet > state.bankroll) state.bet = Math.max(10, Math.floor(state.bankroll / 10) * 10);
+    state.hands = [];
+    state.dealerHand = [];
+    state.currentIdx = 0;
+    state.phase = 'betting';
+    state.message = '设定注码后点击「发牌」';
+    render();
+  }
+
+  function reset() {
+    state.shoe = createShoe();
+    state.bankroll = 1000;
+    state.bet = 10;
+    state.hands = [];
+    state.dealerHand = [];
+    state.currentIdx = 0;
+    state.phase = 'betting';
+    state.message = '已重置';
+    state.history = [];
+    state.stats = { rounds: 0, wins: 0, losses: 0, pushes: 0 };
+    render();
+  }
+
+  function adjustBet(delta) {
+    var cap = Math.min(100, state.bankroll);
+    state.bet = Math.min(cap, Math.max(10, state.bet + delta));
+    render();
+  }
+
+  // ---- 渲染 ----
+  function cardEl(card, hidden) {
+    var div = document.createElement('div');
+    if (hidden) {
+      div.className = 'card hidden';
+      div.textContent = '?';
+      return div;
+    }
+    var red = card.suit === '♥' || card.suit === '♦';
+    div.className = 'card ' + (red ? 'red' : 'black');
+    var r = document.createElement('div'); r.className = 'rank'; r.textContent = card.rank;
+    var s = document.createElement('div'); s.className = 'suit'; s.textContent = card.suit;
+    div.appendChild(r); div.appendChild(s);
+    return div;
+  }
+
+  function handLabel(h) {
+    var t = handTotal(h.cards);
+    var tag = '';
     if (h.surrendered) tag = ' 投降';
     else if (t > 21) tag = ' 爆';
     else if (t === 21 && h.cards.length === 2 && !h.fromSplit) tag = ' BJ';
     else if (h.doubled) tag = ' D';
     else if (isSoft(h.cards) && t < 21) tag = ' soft';
-    return `[${t}${tag}]`;
-  };
+    return '[' + t + tag + ']';
+  }
 
-  const totalWagered = hands.reduce((s, h) => s + h.bet, 0);
-  const totalNet = history.reduce((s, h) => s + h.net, 0);
+  function el(id) { return document.getElementById(id); }
 
-  return (
-    <div className="min-h-screen bg-emerald-900 text-slate-100 p-4 font-mono">
-      <div className="max-w-2xl mx-auto">
-        <h1 className="text-2xl font-bold mb-1">Blackjack</h1>
-        <div className="text-xs text-emerald-200 mb-4">
-          6 副 · S17 · BJ 3:2 · DAS · 投降 50% · 分牌仅同 rank · 不可 resplit · 拆 A 各发一张
-        </div>
+  function render() {
+    var showHole = state.phase !== 'playing';
 
-        <div className="grid grid-cols-3 gap-2 mb-4 text-sm">
-          <div className="bg-emerald-800 rounded p-2">
-            <div className="text-emerald-300 text-xs">余额</div>
-            <div className="text-lg font-bold">${bankroll}</div>
-          </div>
-          <div className="bg-emerald-800 rounded p-2">
-            <div className="text-emerald-300 text-xs">本局总注</div>
-            <div className="text-lg font-bold">${totalWagered || bet}</div>
-          </div>
-          <div className="bg-emerald-800 rounded p-2">
-            <div className="text-emerald-300 text-xs">牌堆</div>
-            <div className="text-lg font-bold">{shoe.length}/{SHOE_SIZE}</div>
-          </div>
-        </div>
+    // 状态条
+    el('bankroll').textContent = '$' + state.bankroll;
+    var totalWagered = 0;
+    for (var i = 0; i < state.hands.length; i++) totalWagered += state.hands[i].bet;
+    el('wagered').textContent = '$' + (totalWagered || state.bet);
+    el('shoe').textContent = state.shoe.length + '/' + SHOE_SIZE;
 
-        <div className="mb-3">
-          <div className="text-sm mb-1">
-            庄家 <span className="text-emerald-300">
-              [{dealerHand.length === 0 ? '' :
-                showHole ? handTotal(dealerHand) :
-                  rankValue(dealerHand[0].rank) + ' + ?'}]
-            </span>
-          </div>
-          <div className="min-h-[5rem]">
-            {dealerHand.map((c, i) => (
-              <Card key={i} card={c} hidden={i === 1 && !showHole} />
-            ))}
-          </div>
-        </div>
+    // 庄家
+    var dt = '';
+    if (state.dealerHand.length > 0) {
+      dt = showHole ? handTotal(state.dealerHand) : (rankValue(state.dealerHand[0].rank) + ' + ?');
+    }
+    el('dealer-total').textContent = '[' + dt + ']';
+    var dc = el('dealer-cards'); dc.innerHTML = '';
+    for (var di = 0; di < state.dealerHand.length; di++) {
+      dc.appendChild(cardEl(state.dealerHand[di], di === 1 && !showHole));
+    }
 
-        <div className="mb-3">
-          <div className="text-sm mb-1">玩家</div>
-          {hands.length === 0 ? (
-            <div className="min-h-[5rem]" />
-          ) : (
-            hands.map((h, i) => {
-              const active = phase === 'playing' && i === currentIdx;
-              return (
-                <div key={i}
-                  className={`mb-2 p-1 rounded ${active ? 'bg-amber-900/40 border border-amber-500' : ''}`}>
-                  <div className="text-xs mb-1">
-                    {hands.length > 1 ? `手 ${i + 1} ` : ''}
-                    <span className="text-emerald-300">{handLabel(h)}</span>
-                    <span className="text-emerald-200 ml-2">注 ${h.bet}</span>
-                    {active && <span className="text-amber-400 ml-2">← 当前</span>}
-                  </div>
-                  <div>
-                    {h.cards.map((c, ci) => <Card key={ci} card={c} />)}
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
+    // 玩家
+    var ph = el('player-hands'); ph.innerHTML = '';
+    if (state.hands.length === 0) {
+      var empty = document.createElement('div'); empty.className = 'cards-row'; ph.appendChild(empty);
+    } else {
+      for (var hi = 0; hi < state.hands.length; hi++) {
+        var h = state.hands[hi];
+        var active = state.phase === 'playing' && hi === state.currentIdx;
+        var block = document.createElement('div');
+        block.className = 'hand-block' + (active ? ' active' : '');
+        var meta = document.createElement('div');
+        meta.className = 'hand-meta';
+        meta.innerHTML =
+          (state.hands.length > 1 ? ('手 ' + (hi + 1) + ' ') : '') +
+          '<span class="tag">' + handLabel(h) + '</span>' +
+          '<span class="bet">注 $' + h.bet + '</span>' +
+          (active ? '<span class="cur">← 当前</span>' : '');
+        block.appendChild(meta);
+        var row = document.createElement('div');
+        for (var ci = 0; ci < h.cards.length; ci++) row.appendChild(cardEl(h.cards[ci], false));
+        block.appendChild(row);
+        ph.appendChild(block);
+      }
+    }
 
-        <div className="bg-slate-900 border border-emerald-700 rounded p-2 mb-4 text-sm">
-          {message}
-        </div>
+    el('message').textContent = state.message;
 
-        {phase === 'betting' && (
-          <div className="mb-4">
-            <div className="text-xs text-emerald-200 mb-2">注码 (10–100)</div>
-            <div className="flex flex-wrap gap-2 mb-2">
-              {[10, 20, 50, 100].map(v => (
-                <button key={v}
-                  onClick={() => setBet(Math.min(v, bankroll))}
-                  disabled={v > bankroll}
-                  className={`px-3 py-1 rounded border ${bet === v ? 'bg-amber-500 text-slate-900 border-amber-400' : 'bg-slate-800 border-slate-600 hover:bg-slate-700'} disabled:opacity-40`}>
-                  ${v}
-                </button>
-              ))}
-              <button onClick={() => adjustBet(-10)} className="px-3 py-1 rounded border bg-slate-800 border-slate-600 hover:bg-slate-700">−10</button>
-              <button onClick={() => adjustBet(10)} className="px-3 py-1 rounded border bg-slate-800 border-slate-600 hover:bg-slate-700">+10</button>
-            </div>
-            <button onClick={startHand}
-              disabled={bet > bankroll || bet < 10}
-              className="px-5 py-2 rounded bg-amber-500 text-slate-900 font-bold hover:bg-amber-400 disabled:opacity-40">
-              发牌 (${bet})
-            </button>
-          </div>
-        )}
+    // 控制区显隐
+    el('bet-controls').className = 'controls' + (state.phase === 'betting' ? '' : ' hidden-el');
+    el('play-controls').className = 'btn-row' + (state.phase === 'playing' ? '' : ' hidden-el');
+    el('settled-controls').className = 'btn-row' + (state.phase === 'settled' ? '' : ' hidden-el');
 
-        {phase === 'playing' && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            <button onClick={hit}
-              className="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 font-bold">
-              要牌
-            </button>
-            <button onClick={stand}
-              className="px-4 py-2 rounded bg-orange-600 hover:bg-orange-500 font-bold">
-              停牌
-            </button>
-            <button onClick={doubleDown} disabled={!canDouble}
-              className="px-4 py-2 rounded bg-purple-600 hover:bg-purple-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed">
-              加倍
-            </button>
-            <button onClick={split} disabled={!canSplit}
-              className="px-4 py-2 rounded bg-pink-600 hover:bg-pink-500 font-bold disabled:opacity-30 disabled:cursor-not-allowed">
-              分牌
-            </button>
-            <button onClick={surrender} disabled={!canSurrender}
-              className="px-4 py-2 rounded bg-rose-700 hover:bg-rose-600 font-bold disabled:opacity-30 disabled:cursor-not-allowed">
-              投降
-            </button>
-          </div>
-        )}
+    // 下注阶段
+    if (state.phase === 'betting') {
+      var chipRow = el('chip-row'); chipRow.innerHTML = '';
+      [10, 20, 50, 100].forEach(function (v) {
+        var b = document.createElement('button');
+        b.className = 'chip' + (state.bet === v ? ' sel' : '');
+        b.textContent = '$' + v;
+        b.disabled = v > state.bankroll;
+        b.onclick = function () { state.bet = Math.min(v, state.bankroll); render(); };
+        chipRow.appendChild(b);
+      });
+      var minus = document.createElement('button'); minus.textContent = '−10'; minus.onclick = function () { adjustBet(-10); };
+      var plus = document.createElement('button'); plus.textContent = '+10'; plus.onclick = function () { adjustBet(10); };
+      chipRow.appendChild(minus); chipRow.appendChild(plus);
+      var deal = el('deal-btn');
+      deal.textContent = '发牌 ($' + state.bet + ')';
+      deal.disabled = state.bet > state.bankroll || state.bet < 10;
+    }
 
-        {phase === 'settled' && (
-          <div className="flex flex-wrap gap-2 mb-4">
-            <button onClick={nextHand}
-              disabled={bankroll < 10}
-              className="px-4 py-2 rounded bg-emerald-500 text-slate-900 font-bold hover:bg-emerald-400 disabled:opacity-40">
-              下一局
-            </button>
-            <button onClick={reset}
-              className="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">
-              重置
-            </button>
-          </div>
-        )}
+    // 操作阶段按钮可用性
+    if (state.phase === 'playing') {
+      var cur = state.hands[state.currentIdx];
+      var canDouble = cur && cur.cards.length === 2 && !cur.doubled && !cur.isAcesSplit && cur.bet <= state.bankroll;
+      var canSurrender = state.hands.length === 1 && cur && cur.cards.length === 2 && !cur.doubled;
+      var canSplit = state.hands.length === 1 && cur && cur.cards.length === 2 &&
+        cur.cards[0].rank === cur.cards[1].rank && cur.bet <= state.bankroll;
+      el('dbl-btn').disabled = !canDouble;
+      el('surr-btn').disabled = !canSurrender;
+      el('split-btn').disabled = !canSplit;
+    }
 
-        <div className="border-t border-emerald-700 pt-3 text-xs text-emerald-100">
-          <div className="flex flex-wrap gap-x-4 gap-y-1 mb-2">
-            <span>局数: {stats.rounds}</span>
-            <span>胜: {stats.wins}</span>
-            <span>负: {stats.losses}</span>
-            <span>平: {stats.pushes}</span>
-            <span>累计盈亏: <span className={totalNet >= 0 ? 'text-emerald-300' : 'text-red-300'}>{totalNet >= 0 ? '+' : ''}{totalNet}</span></span>
-          </div>
-          {history.length > 0 && (
-            <div>
-              <div className="text-emerald-300 mb-1">近 10 局:</div>
-              <div className="flex flex-wrap gap-1">
-                {history.map((h, i) => (
-                  <span key={i}
-                    className={`px-2 py-0.5 rounded ${h.net > 0 ? 'bg-emerald-700' : h.net < 0 ? 'bg-red-800' : 'bg-slate-700'}`}>
-                    {h.net > 0 ? '+' : ''}{h.net}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
+    // 结算阶段
+    el('next-btn').disabled = state.bankroll < 10;
+
+    // 统计
+    el('s-rounds').textContent = state.stats.rounds;
+    el('s-wins').textContent = state.stats.wins;
+    el('s-losses').textContent = state.stats.losses;
+    el('s-pushes').textContent = state.stats.pushes;
+    var totalNet = 0;
+    for (var ti = 0; ti < state.history.length; ti++) totalNet += state.history[ti].net;
+    var netEl = el('s-net');
+    netEl.textContent = (totalNet >= 0 ? '+' : '') + totalNet;
+    netEl.className = totalNet >= 0 ? 'pos' : 'neg';
+
+    var hw = el('history-wrap');
+    hw.className = state.history.length > 0 ? '' : 'hidden-el';
+    var hr = el('history-row'); hr.innerHTML = '';
+    state.history.forEach(function (h) {
+      var span = document.createElement('span');
+      span.className = 'hpill ' + (h.net > 0 ? 'win' : h.net < 0 ? 'loss' : 'push');
+      span.textContent = (h.net > 0 ? '+' : '') + h.net;
+      hr.appendChild(span);
+    });
+  }
+
+  // ---- 绑定 ----
+  el('deal-btn').onclick = startHand;
+  el('hit-btn').onclick = hit;
+  el('stand-btn').onclick = stand;
+  el('dbl-btn').onclick = doubleDown;
+  el('split-btn').onclick = split;
+  el('surr-btn').onclick = surrender;
+  el('next-btn').onclick = nextHand;
+  el('reset-btn').onclick = reset;
+
+  render();
+})();
+</script>
+</body>
+</html>
